@@ -89,9 +89,9 @@ isLastFin (fS f) with (isLastFin f)
      isLastFin (fS (weaken f'))     | notLast f' = notLast (fS f')
 
 -- A view of whether an element of Fin is the last element in it.
-data InteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin n) -> Type where
-     exterior : (k : Nat) -> (o : Nat) -> (o' : Nat) -> InteriorFin (S k + o) (S o + o') (weakenN o (last {n = k}))
-     interior : (k : Nat) -> (c : Nat) -> (f : Fin k) -> InteriorFin (plus k c) c (weakenN c f)
+data InteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin (S n)) -> Type where
+     exterior : (k : Nat) -> (o : Nat) -> (o' : Nat) -> InteriorFin (k + o) (S o + o') (weakenN o (last {n = k}))
+     interior : (k : Nat) -> (c : Nat) -> (f : Fin (S k)) -> InteriorFin (k + c) c (weakenN c f)
 
 weakenNZeroNeutral : {n : Nat} -> (f : Fin (S n)) -> (weakenN Z f = f)
 weakenNZeroNeutral {n = k} fZ = rewrite (plusZeroRightNeutral k) in refl
@@ -99,22 +99,23 @@ weakenNZeroNeutral {n = S k} (fS f) with (weakenNZeroNeutral f)
                    weakenNZeroNeutral {n = S k} (fS f) | eq = ?cantMakeThisWork
                     -- cong eq --  ?asd --cong eq {f = fS} --rewrite sym (plusZeroRightNeutral k) in
 
---Totality checker broken?
-isInteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin n) -> InteriorFin n c f
-isInteriorFin (S n) c fZ with (cmp n c)
-              isInteriorFin (S n2) (n2 + S c2) fZ | cmpLT c2 = --in the boundary
+total
+isInteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin (S n)) -> InteriorFin n c f
+isInteriorFin n c fZ with (cmp n c)
+              isInteriorFin n2 (n2 + S c2) fZ | cmpLT c2 = --in the boundary
                             rewrite sym (plusSuccRightSucc n2 c2) in
                             exterior Z n2 c2
-              isInteriorFin (S c2) c2 fZ          | cmpEQ    = --last interior element
-                            interior (S Z) c2 (fZ {k = Z})
-              isInteriorFin (S (c2 + S n2)) c2 fZ | cmpGT n2 = --interior elements
+              isInteriorFin c2 c2 fZ          | cmpEQ    = --last interior element
+                            interior Z c2 (fZ {k = Z})
+              isInteriorFin (c2 + S n2) c2 fZ | cmpGT n2 = --interior elements
                             rewrite (plusCommutative c2 (S n2)) in
-                            interior (S (S n2)) c2 (fZ {k = S n2})
+                            interior (S n2) c2 (fZ {k = S n2})
 isInteriorFin (S n) c (fS f) with (isInteriorFin n c f)
-              isInteriorFin (S (plus k c)) c (fS (weakenN c f')) | interior k c f'
+              isInteriorFin (S (k + c)) c (fS (weakenN c f')) | interior k c f'
                             = interior (S k) c (fS f')
-              isInteriorFin (S (S k + o)) (S o + o') (fS _)      | exterior k o o'
+              isInteriorFin (S (k + o)) (S o + o') (fS _)     | exterior k o o'
                             = exterior (S k) o o'
+isInteriorFin Z _ (fS fZ) impossible                            
 
 isLastFin2 : Fin n -> Bool
 isLastFin2 f = not (hasProperSuccFin f)
@@ -255,30 +256,61 @@ approx_inner _     (S Z) _       (fS fZ) impossible
 --     effects to prove type safety.)
 -- Implement other ideas such as units/dimension checking. Probably low priority as that has been done before?
 
+-- Using the more general isInteriorFin instead of isLast view.
+approx6 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat)
+       -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+approx6 alpha dT dX eT eX = approx_inner eT eX where
+        approx_inner : (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+        approx_inner _ _ _    fZ = 1.0
+        approx_inner _ _ fZ   _  = 0.0
+        approx_inner (S eT) (S eX) (fS t) (fS x) with (isInteriorFin eX 1 x)
+                     approx_inner (S eT) (S (eX' + Z)) (fS t) (fS _)
+                                  | exterior eX' Z Z = 0.0
+                     approx_inner (S eT) (S (eX' + (S Z))) (fS t) (fS (weakenN (S Z) y))
+                                  | interior eX' (S Z) y =
+                                  let c = alpha * (dT / (dX * dX)) in
+                                  let ap = approx_inner (S eT) (S (S eX')) (weaken t) in
+                                  ap (fS (weaken y))
+                                  +  c * (ap (weaken (weaken y))
+                                          - 2.0 * ap (fS (weaken y))
+                                          + ap (fS (fS y)))
+        approx_inner Z _ (fS fZ) _ impossible                                                        
+        approx_inner _ Z _ (fS fZ) impossible
+                                          
 
--- -- A view of whether an element of Fin is the last element in it.
--- data InteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin n) -> Type where
---      exterior : (k : Nat) -> (o : Nat) -> (o' : Nat) -> InteriorFin (S k + o) (S o + o') (weakenN o (last {n = k}))
---      interior : (k : Nat) -> (c : Nat) -> (f : Fin k) -> InteriorFin (plus k c) c (weakenN c f)
+-- Not total as the compiler doesn't know that exterior eX' _ (S _) is impossible
+approx_inner2 : (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+approx_inner2 _ _ _    fZ = 1.0
+approx_inner2 _ _ fZ   _  = 0.0
+approx_inner2 (S eT) (S eX) (fS t) (fS x) with (isInteriorFin eX 1 x)
+             approx_inner2 (S eT) (S (eX' + Z)) (fS t) (fS _)
+             | exterior eX' Z Z = 0.0
+             approx_inner2 (S eT) (S (eX' + _)) (fS t) (fS _)
+             | exterior eX' (S _) _ impossible 
+             -- approx_inner2 (S eT) (S (eX' + Z)) (fS t) (fS _)
+             -- | exterior eX' Z (S _) = 2.0
+             -- The case above is said to be valid and when used, it marks the first case,
+             -- i.e. exterior eX' Z Z as unreachable.
+             approx_inner2 (S eT) (S (eX' + (S Z))) (fS t) (fS (weakenN (S Z) y))
+             | interior eX' (S Z) y =
+             let c = 1.0 in
+             let ap = approx_inner2 (S eT) (S (S eX')) (weaken t) in
+             ap (fS (weaken y))
+                +  c * (ap (weaken (weaken y))
+                       - 2.0 * ap (fS (weaken y))
+                       + ap (fS (fS y)))
+approx_inner2 Z _ (fS fZ) _ impossible
+approx_inner2 _ Z _ (fS fZ) impossible
 
+-- Problem: with the range being parametrized, it is hard to convince the compiler of the
+-- impossibility of certain cases, as witnessed above.
 
--- approx6 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat)
---        -> (t : Fin eT) -> (x : Fin eX) -> Float
--- approx6 alpha dT dX eT eX = approx_inner eT eX where
---         approx_inner : (eT : Nat) -> (eX : Nat) -> (t : Fin eT) -> (x : Fin eX) -> Float
---         approx_inner _ _ _    fZ = 1.0
---         approx_inner _ _ fZ   _  = 0.0
---         approx_inner (S (S eT)) (S (S eX)) (fS t) (fS x) with (isInteriorFin (S eX) 1 x)
---                      approx_inner (S (S eT)) (S (S eX)) (fS t) (fS _) | exterior eX Z Z = 0.0
---                      -- approx_inner (S (S eT)) (S (S eX)) (fS t) (fS (weaken y))      | notLast y =
---                      --              let c = alpha * (dT / (dX * dX)) in
---                      --              let ap = approx_inner (S (S eT)) (S (S eX)) (weaken t) in
---                      --              ap (fS (weaken y))
---                      --              +  c * (ap (weaken (weaken y))
---                      --                      - 2.0 * ap (fS (weaken y))
---                      --                      + ap (fS (fS y)))
---         -- These two cases have to be stated to be explicitely impossible, idris can't figure that out by itself
---         approx_inner (S Z) _     (fS fZ) _       impossible
---         approx_inner _     (S Z) _       (fS fZ) impossible
-
-
+--- Demonstrate how isInteriorFin can be used when relating to successor and its successor
+--- via a reversed fibonacci sequence
+fib : (n : Nat) -> (x : Fin (S n)) -> Nat
+fib n x with (isInteriorFin n 2 x)
+     fib (n' + Z) _               | exterior n' Z (S Z) = 0
+     fib (n' + (S Z)) _           | exterior n' (S Z) Z = 1
+     fib _ (weakenN (S (S Z)) x') | interior n' (S (S Z)) x'
+         = fib (S (S n')) (weaken (fS x'))
+         + fib (S (S n')) (fS (fS x'))
