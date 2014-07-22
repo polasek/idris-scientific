@@ -361,13 +361,10 @@ createFin : (f : Fin (S n) -> a) -> Vect (S n) a
 createFin {n = k} f = rewrite sym (lastIsLast k) in reverse (create_ f (last {n = k}))
 
 createFinCorrect : (f : Fin (S n) -> a) -> (k : Fin (S n)) -> (index k (createFin f) = f k)
-createFinCorrect f fZ = ?asdf
+createFinCorrect f fZ = ?createFinCorrect_lemma
 
 memoize : {a : Type} -> (n : Nat) -> (Fin (S n) -> a) -> Fin (S n) -> a
 memoize {a = a} n f = let mem : Vect (S n) (Lazy a) = createFin (\x : Fin (S n) => (f x)) in (\x => index x mem)
-
-memoizeCorrect : (f : (Fin (S n) -> a)) -> (k : Fin (S n)) -> (memoize n f k = f k)
-memoizeCorrect f k = ?asd
 
 -- A version failing to use memoization. This might prove more difficult than expected.
 approx7 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat)
@@ -405,14 +402,28 @@ complement {n = (S (S _))} (fS i) = weaken (complement i)
 complement {n = (S Z)} (fS fZ) impossible
 
 reverseCorrect : (v : Vect n a) -> (i : Fin n) -> (index i v = index (complement i) (reverse v))
-reverseCorrect {n = S Z} v fZ = ?rC_base
+reverseCorrect {n = S Z} v fZ = ?reverseCorrect_lemma
 
 --reverseCorrect {n = Z} _ fZ impossible
 
 -- Indexes from 0 to (n-1)
+total
 indexes : {n : Nat} -> Vect n (Fin n)
 indexes {n = Z} = []
 indexes {n = S n'} = fZ::map fS indexes
+
+--rename this?
+total
+map_property : (i : Fin n) -> (v : Vect n a) -> (f : a -> b) -> (index i (map f v) = f (index i v))
+map_property fZ     (x::xs) _ = refl
+map_property (fS i) (_::xs) f = map_property i xs f
+
+total
+indexes_correct : (i : Fin n) -> (index i indexes = i)
+indexes_correct fZ = refl
+indexes_correct {n = S n'} (fS f) = rewrite map_property f indexes fS in
+                                    rewrite indexes_correct f in
+                                    refl
 
 -- We try to compute a function iteratively, folding over the toplevel dimension (time) and the lower level
 -- dimension. (Mapping on x is not appropriate as we want to index into different parts of the list.)
@@ -430,6 +441,11 @@ foldXf f f2 = let a = map (f2 f) indexes in -- Need this part to be evaluated ju
 memoize' : {n : Nat} -> (Fin n -> a) -> Fin n -> a
 memoize' f = let a = map f indexes in
          \i => index i a
+
+memoize_correct : (f : Fin n -> a) -> (i : Fin n) -> (memoize' f i = f i)
+memoize_correct f i = rewrite map_property i indexes f in
+                      rewrite indexes_correct i in
+                      refl
 
 -- In this particular case, we just want to iterate over T.  
 foldTX : {m : Nat} -> (n : Nat) -> (acc : Vect m a) -> (f : (Vect m a -> Fin m -> a)) -> Vect m a
@@ -450,11 +466,10 @@ expF' : {a : Type} -> Nat -> (Fin n -> a) -> ((Fin n -> a) -> Fin n -> a) -> Fin
 expF' n init f = foldr (\f => \acc => memoize' (f acc)) init (Vect.replicate n f)
 
 weaken' : Fin n -> Fin (n + 1)
-weaken' fZ = fZ
-weaken' (fS k) = believe_me (fS (weaken k))
+weaken' {n = n'} f = rewrite (plusCommutative n' 1) in weaken f
 
 fS' : {n : Nat} -> Fin n -> Fin (n + 1)
-fS' {n = n'} f = believe_me (fS f)
+fS' {n = n'} f = rewrite (plusCommutative n' 1) in fS f
 
 -- Bonus: we get a nice decoupling this way, as the state only strictly depends on the previous state, not necessarily
 -- on the actual timestep. (Had that in previous definitions as well, but is an important notion. Perhaps we could
@@ -474,16 +489,13 @@ approx8 alpha dT dX eT' eX' = (\t => \x => index x (foldTX (finToNat t) (map ini
              | interior eXb (S Z) y =
                let c = alpha * (dT / (dX * dX)) in
                let app  =  (\i => index i a) in
-                 app (fS (weaken' y))
+--               rewrite (plusCommutative eXb 1) in
+               app (fS (weaken' y))
                     +  c * (app (weaken (weaken' y))
                                - 2.0 * app (fS (weaken' y))
                                + app (fS (fS' y)))
         step {eX = Z} _ (fS fZ) impossible
 
-
--- Bonus: we get a nice decoupling this way, as the state only strictly depends on the previous state, not necessarily
--- on the actual timestep. (Had that in previous definitions as well, but is an important notion. Perhaps we could
--- enforce this even further, decouple plumbing and data.)
 approx9 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
 approx9 alpha dT dX eT' eX' = (\t => foldTXf (finToNat t) initial step) where
         initial : Fin (S n) -> Float
@@ -506,7 +518,7 @@ approx9 alpha dT dX eT' eX' = (\t => foldTXf (finToNat t) initial step) where
 
 
 approx10 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
-approx10 alpha dT dX eT' eX' t = expF (finToNat t) initial step where
+approx10 alpha dT dX eT' eX' t = expF' (finToNat t) initial step where
         initial : Fin (S n) -> Float
         initial fZ = 1.0
         initial _  = 0.0
