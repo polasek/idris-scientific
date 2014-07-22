@@ -95,9 +95,7 @@ data InteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin (S n)) -> Type where
 
 weakenNZeroNeutral : {n : Nat} -> (f : Fin (S n)) -> (weakenN Z f = f)
 weakenNZeroNeutral {n = k} fZ = rewrite (plusZeroRightNeutral k) in refl
-weakenNZeroNeutral {n = S k} (fS f) with (weakenNZeroNeutral f)
-                   weakenNZeroNeutral {n = S k} (fS f) | eq = ?cantMakeThisWork
-                    -- cong eq --  ?asd --cong eq {f = fS} --rewrite sym (plusZeroRightNeutral k) in
+weakenNZeroNeutral {n = S k} (fS f) = let ih = weakenNZeroNeutral f in ?cantMakeThisWork
 
 total
 isInteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin (S n)) -> InteriorFin n c f
@@ -117,6 +115,25 @@ isInteriorFin (S n) c (fS f) with (isInteriorFin n c f)
                             = exterior (S k) o o'
 isInteriorFin Z _ (fS fZ) impossible                            
 
+total
+isInteriorFin2 : (c : Nat) -> (f : Fin (S n)) -> InteriorFin n c f
+isInteriorFin2 {n = n'} c fZ with (cmp n' c)
+              isInteriorFin2 {n = n2} (n2 + S c2) fZ | cmpLT c2 = --in the boundary
+                            rewrite sym (plusSuccRightSucc n2 c2) in
+                            exterior Z n2 c2
+              isInteriorFin2 {n = c2} c2 fZ          | cmpEQ    = --last interior element
+                            interior Z c2 (fZ {k = Z})
+              isInteriorFin2 {n = (c2 + S n2)} c2 fZ | cmpGT n2 = --interior elements
+                            rewrite (plusCommutative c2 (S n2)) in
+                            interior (S n2) c2 (fZ {k = S n2})
+isInteriorFin2 {n = (S n')} c (fS f) with (isInteriorFin n' c f)
+              isInteriorFin2 {n = (S (k + c))} c (fS (weakenN c f')) | interior k c f'
+                            = interior (S k) c (fS f')
+              isInteriorFin2 {n = (S (k + o))} (S o + o') (fS _)     | exterior k o o'
+                            = exterior (S k) o o'
+isInteriorFin2 {n = Z} _ (fS fZ) impossible                            
+ 
+   
 isLastFin2 : Fin n -> Bool
 isLastFin2 f = not (hasProperSuccFin f)
 
@@ -242,7 +259,7 @@ approx_inner (S (S eT)) (S (S eX)) (fS t) (fS x) with (isLastFin {n = S eX} x)
                                           + ap (weaken (weaken y)))
 approx_inner (S Z) _     (fS fZ) _       impossible
 approx_inner _     (S Z) _       (fS fZ) impossible
- 
+
 -- Next steps:
 -- Write a simple DSL to hide the verbosity.
 -- Preservation of energy: can this be done algebraically/syntactically?
@@ -307,10 +324,140 @@ approx_inner2 _ Z _ (fS fZ) impossible
 
 --- Demonstrate how isInteriorFin can be used when relating to successor and its successor
 --- via a reversed fibonacci sequence
-fib : (n : Nat) -> (x : Fin (S n)) -> Nat
+fib : (n : Nat) -> Fin (S n) -> Nat
 fib n x with (isInteriorFin n 2 x)
      fib (n' + Z) _               | exterior n' Z (S Z) = 0
      fib (n' + (S Z)) _           | exterior n' (S Z) Z = 1
      fib _ (weakenN (S (S Z)) x') | interior n' (S (S Z)) x'
          = fib (S (S n')) (weaken (fS x'))
          + fib (S (S n')) (fS (fS x'))
+
+succPlusZeroRightNeutral : (k : Nat) -> (S (plus k Z) = S k)
+succPlusZeroRightNeutral k = rewrite (plusZeroRightNeutral k) in refl
+
+finSuccPlusZeroRightNeutral : (k : Nat) -> (Fin (S (plus k Z)) = Fin (S k))
+finSuccPlusZeroRightNeutral k = rewrite (plusZeroRightNeutral k) in refl
+
+createRev : (n : Nat) -> (f : (Nat -> a)) -> Vect n a
+createRev Z _ = []
+createRev (S n) f = f n::createRev n f
+
+create : (n : Nat) -> (f : (Nat -> a)) -> Vect n a
+create n f = reverse (createRev n f)
+
+lastIsLast : (k : Nat) -> (finToNat (last {n = k}) = k)
+lastIsLast Z = refl
+lastIsLast (S k') = rewrite (lastIsLast k') in refl
+
+weakenPreservesValue : (f : Fin n) -> (finToNat (weaken f) = finToNat f)
+weakenPreservesValue fZ = refl
+weakenPreservesValue (fS f) = rewrite (weakenPreservesValue f) in refl
+
+create_ : (f : Fin (S n) -> a) -> (k : Fin (S n)) -> Vect (S (finToNat k)) a
+create_ f fZ = [f fZ]
+create_ {n = S _} f (fS k) = rewrite sym (weakenPreservesValue k) in f (fS k)::create_ f (weaken k)
+
+createFin : (f : Fin (S n) -> a) -> Vect (S n) a
+createFin {n = k} f = rewrite sym (lastIsLast k) in reverse (create_ f (last {n = k}))
+
+createFinCorrect : (f : Fin (S n) -> a) -> (k : Fin (S n)) -> (index k (createFin f) = f k)
+createFinCorrect f fZ = ?asdf
+
+memoize : {a : Type} -> (n : Nat) -> (Fin (S n) -> a) -> Fin (S n) -> a
+memoize {a = a} n f = let mem : Vect (S n) (Lazy a) = createFin (\x : Fin (S n) => (f x)) in (\x => index x mem)
+
+memoizeCorrect : (f : (Fin (S n) -> a)) -> (k : Fin (S n)) -> (memoize n f k = f k)
+memoizeCorrect f k = ?asd
+
+-- A version failing to use memoization. This might prove more difficult than expected.
+approx7 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat)
+-> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+approx7 alpha dT dX eT' eX' = approx_inner {eT = eT'} {eX = eX'} where
+        mutual
+                approx_inner : {eT : Nat} -> {eX : Nat} -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+                approx_inner _    fZ = 1.0
+                approx_inner fZ   _  = 0.0
+                approx_inner {eT = S eTa} {eX = S eXa} (fS t) (fS x) with (isInteriorFin eXa 1 x)
+                     approx_inner {eT = S eTb} {eX = S (eXb + Z)} (fS t) (fS _)
+                                  | exterior eXb Z Z = 0.0
+                     approx_inner {eT = (S eTb)} {eX = (S (eXb + (S Z)))} (fS t) (fS (weakenN (S Z) y))
+                                  | interior eXb (S Z) y =
+                                  let c = alpha * (dT / (dX * dX)) in
+                                  let ap = approx_mem'd {eT = (S eTb)} {eX = (S (S eXb))} (weaken t) in
+                                  ap (fS (weaken y))
+                                  +  c * (ap (weaken (weaken y))
+                                          - 2.0 * ap (fS (weaken y))
+                                          + ap (fS (fS y)))
+                approx_inner {eT = Z} (fS fZ) _ impossible
+                approx_inner {eX = Z} _ (fS fZ) impossible
+
+                approx_mem'd : {eT : Nat} -> {eX : Nat} -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+                approx_mem'd {eT = eTa} {eX = eXa} =
+                             memoize eTa (\t : Fin (S eTa) =>
+                                     memoize eXa (\x : Fin (S eXa) => approx_inner {eT = eTa} {eX = eXa} t x))
+
+-- Returns the complement number in the given set
+
+total
+complement : (Fin n) -> (Fin n)
+complement {n = (S _)}     fZ     = last
+complement {n = (S (S _))} (fS i) = weaken (complement i)
+complement {n = (S Z)} (fS fZ) impossible
+
+reverseCorrect : (v : Vect n a) -> (i : Fin n) -> (index i v = index (complement i) (reverse v))
+reverseCorrect {n = S Z} v fZ = ?rC_base
+
+--reverseCorrect {n = Z} _ fZ impossible
+
+-- Indexes from 0 to (n-1)
+indexes : {n : Nat} -> Vect n (Fin n)
+indexes {n = Z} = []
+indexes {n = S n'} = fZ::map fS indexes
+
+-- We try to compute a function iteratively, folding over the toplevel dimension (time) and the lower level
+-- dimension. (Mapping on x is not appropriate as we want to index into different parts of the list.)
+
+foldX : {m : Nat} -> Vect m a -> (f : (Vect m a ->  Fin m -> a)) -> Vect m a
+foldX a f = map (f a) indexes
+
+-- Perhaps hide the implementation better?
+foldXf : {m : Nat} -> (Fin m -> a) -> ((Fin m -> a) -> Fin m -> a) -> Fin m -> a
+foldXf f f2 = let a = map (f2 f) indexes in -- Need this part to be evaluated just once.
+                                            -- TODO find order of evaluation
+              (\x => index x a)
+
+-- In this particular case, we just want to iterate over T.  
+foldTX : {m : Nat} -> (n : Nat) -> (acc : Vect m a) -> (f : (Vect m a -> Fin m -> a)) -> Vect m a
+foldTX Z     acc _ = acc
+foldTX (S n) acc f = foldTX n (foldX acc f) f
+
+weaken' : Fin n -> Fin (n + 1)
+weaken' fZ = fZ
+weaken' (fS k) ?= fS (weaken k)
+
+fS' : {n : Nat} -> Fin n -> Fin (n + 1)
+fS' {n = n'} f ?= fS f
+
+-- Bonus: we get a nice decoupling this way, as the state only strictly depends on the previous state, not necessarily
+-- on the actual timestep. (Had that in previous definitions as well, but is an important notion. Perhaps we could
+-- enforce this even further, decouple plumbing and data.)
+approx8 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+approx8 alpha dT dX eT' eX' = (\t => \x => index x (foldTX (finToNat t) (map initial indexes) step)) where
+        initial : Fin eX -> Float
+        initial fZ = 1.0
+        initial _  = 0.0
+
+        step : Vect (S eX) Float -> Fin (S eX) -> Float
+        step _ fZ = 1.0
+        step {eX = S eX'} a (fS x) with (isInteriorFin eX' 1 x)
+             step {eX = S (eXb + Z)} a (fS _)
+             | exterior eXb Z Z = 0.0
+             step {eX = (S (eXb + (S Z)))} a (fS (weakenN (S Z) y))
+             | interior eXb (S Z) y =
+               let c = alpha * (dT / (dX * dX)) in
+               let app  =  (\i => index i a) in
+                 app (fS (weaken' y))
+                    +  c * (app (weaken (weaken' y))
+                               - 2.0 * app (fS (weaken' y))
+                               + app (fS (fS' y)))
+        step {eX = Z} _ (fS fZ) impossible
