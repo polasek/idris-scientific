@@ -431,12 +431,16 @@ foldTX : {m : Nat} -> (n : Nat) -> (acc : Vect m a) -> (f : (Vect m a -> Fin m -
 foldTX Z     acc _ = acc
 foldTX (S n) acc f = foldTX n (foldX acc f) f
 
+foldTXf : {m : Nat} -> (n : Nat) -> (init : Fin m -> a) -> (step : (Fin m -> a) -> Fin m -> a) -> Fin m -> a
+foldTXf Z     init _ = init
+foldTXf (S n) init f = foldTXf n (foldXf init f) f
+
 weaken' : Fin n -> Fin (n + 1)
 weaken' fZ = fZ
-weaken' (fS k) ?= fS (weaken k)
+weaken' (fS k) = believe_me (fS (weaken k))
 
 fS' : {n : Nat} -> Fin n -> Fin (n + 1)
-fS' {n = n'} f ?= fS f
+fS' {n = n'} f = believe_me (fS f)
 
 -- Bonus: we get a nice decoupling this way, as the state only strictly depends on the previous state, not necessarily
 -- on the actual timestep. (Had that in previous definitions as well, but is an important notion. Perhaps we could
@@ -460,4 +464,28 @@ approx8 alpha dT dX eT' eX' = (\t => \x => index x (foldTX (finToNat t) (map ini
                     +  c * (app (weaken (weaken' y))
                                - 2.0 * app (fS (weaken' y))
                                + app (fS (fS' y)))
+        step {eX = Z} _ (fS fZ) impossible
+
+
+-- Bonus: we get a nice decoupling this way, as the state only strictly depends on the previous state, not necessarily
+-- on the actual timestep. (Had that in previous definitions as well, but is an important notion. Perhaps we could
+-- enforce this even further, decouple plumbing and data.)
+approx9 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+approx9 alpha dT dX eT' eX' = (\t => foldTXf (finToNat t) initial step) where
+        initial : Fin (S n) -> Float
+        initial fZ = 1.0
+        initial _  = 0.0
+
+        step : (Fin (S eX) -> Float) -> Fin (S eX) -> Float
+        step _ fZ = 1.0
+        step {eX = S eX'} prevT (fS x) with (isInteriorFin eX' 1 x)
+             step {eX = S (eXb + Z)} prevT (fS _)
+             | exterior eXb Z Z = 0.0
+             step {eX = (S (eXb + (S Z)))} prevT (fS (weakenN (S Z) y))
+             | interior eXb (S Z) y =
+               let c = alpha * (dT / (dX * dX)) in
+                 prevT (fS (weaken' y))
+                    +  c * (prevT (weaken (weaken' y))
+                               - 2.0 * prevT (fS (weaken' y))
+                               + prevT (fS (fS' y)))
         step {eX = Z} _ (fS fZ) impossible
