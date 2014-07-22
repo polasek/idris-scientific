@@ -420,11 +420,16 @@ indexes {n = S n'} = fZ::map fS indexes
 foldX : {m : Nat} -> Vect m a -> (f : (Vect m a ->  Fin m -> a)) -> Vect m a
 foldX a f = map (f a) indexes
 
--- Perhaps hide the implementation better?
+-- Perhaps hide the implementation? This essentially makes this a memoize function.
 foldXf : {m : Nat} -> (Fin m -> a) -> ((Fin m -> a) -> Fin m -> a) -> Fin m -> a
 foldXf f f2 = let a = map (f2 f) indexes in -- Need this part to be evaluated just once.
                                             -- TODO find order of evaluation
               (\x => index x a)
+
+-- Probably a better definition of memoize                            
+memoize' : {n : Nat} -> (Fin n -> a) -> Fin n -> a
+memoize' f = let a = map f indexes in
+         \i => index i a
 
 -- In this particular case, we just want to iterate over T.  
 foldTX : {m : Nat} -> (n : Nat) -> (acc : Vect m a) -> (f : (Vect m a -> Fin m -> a)) -> Vect m a
@@ -434,6 +439,15 @@ foldTX (S n) acc f = foldTX n (foldX acc f) f
 foldTXf : {m : Nat} -> (n : Nat) -> (init : Fin m -> a) -> (step : (Fin m -> a) -> Fin m -> a) -> Fin m -> a
 foldTXf Z     init _ = init
 foldTXf (S n) init f = foldTXf n (foldXf init f) f
+
+-- exponentiate function with memoization
+expF : {a : Type} -> Nat -> (Fin n -> a) -> ((Fin n -> a) -> Fin n -> a) -> Fin n -> a
+expF Z     init _ = init
+expF (S n) init f = expF n (memoize' (f init)) f
+
+-- An alternative definition using fold over vectors. Maybe not the nicest implementation?
+expF' : {a : Type} -> Nat -> (Fin n -> a) -> ((Fin n -> a) -> Fin n -> a) -> Fin n -> a
+expF' n init f = foldr (\f => \acc => memoize' (f acc)) init (Vect.replicate n f)
 
 weaken' : Fin n -> Fin (n + 1)
 weaken' fZ = fZ
@@ -472,6 +486,27 @@ approx8 alpha dT dX eT' eX' = (\t => \x => index x (foldTX (finToNat t) (map ini
 -- enforce this even further, decouple plumbing and data.)
 approx9 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
 approx9 alpha dT dX eT' eX' = (\t => foldTXf (finToNat t) initial step) where
+        initial : Fin (S n) -> Float
+        initial fZ = 1.0
+        initial _  = 0.0
+
+        step : (Fin (S eX) -> Float) -> Fin (S eX) -> Float
+        step _ fZ = 1.0
+        step {eX = S eX'} prevT (fS x) with (isInteriorFin eX' 1 x)
+             step {eX = S (eXb + Z)} prevT (fS _)
+             | exterior eXb Z Z = 0.0
+             step {eX = (S (eXb + (S Z)))} prevT (fS (weakenN (S Z) y))
+             | interior eXb (S Z) y =
+               let c = alpha * (dT / (dX * dX)) in
+                 prevT (fS (weaken' y))
+                    +  c * (prevT (weaken (weaken' y))
+                               - 2.0 * prevT (fS (weaken' y))
+                               + prevT (fS (fS' y)))
+        step {eX = Z} _ (fS fZ) impossible
+
+
+approx10 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
+approx10 alpha dT dX eT' eX' t = expF (finToNat t) initial step where
         initial : Fin (S n) -> Float
         initial fZ = 1.0
         initial _  = 0.0
