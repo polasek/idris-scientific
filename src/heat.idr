@@ -93,9 +93,9 @@ data InteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin (S n)) -> Type where
      exterior : (k : Nat) -> (o : Nat) -> (o' : Nat) -> InteriorFin (k + o) (S o + o') (weakenN o (last {n = k}))
      interior : (k : Nat) -> (c : Nat) -> (f : Fin (S k)) -> InteriorFin (k + c) c (weakenN c f)
 
-weakenNZeroNeutral : {n : Nat} -> (f : Fin (S n)) -> (weakenN Z f = f)
-weakenNZeroNeutral {n = k} fZ = rewrite (plusZeroRightNeutral k) in refl
-weakenNZeroNeutral {n = S k} (fS f) = let ih = weakenNZeroNeutral f in ?cantMakeThisWork
+weakenNZeroNeutral : (f : Fin n) -> (weakenN Z f = f)
+weakenNZeroNeutral {n = S k} fZ = rewrite (plusZeroRightNeutral k) in refl
+weakenNZeroNeutral {n = (S (S k))} (fS f) = let ih = weakenNZeroNeutral f in ?cantMakeThisWork
 
 total
 isInteriorFin : (n : Nat) -> (c : Nat) -> (f : Fin (S n)) -> InteriorFin n c f
@@ -360,9 +360,6 @@ create_ {n = S _} f (fS k) = rewrite sym (weakenPreservesValue k) in f (fS k)::c
 createFin : (f : Fin (S n) -> a) -> Vect (S n) a
 createFin {n = k} f = rewrite sym (lastIsLast k) in reverse (create_ f (last {n = k}))
 
-createFinCorrect : (f : Fin (S n) -> a) -> (k : Fin (S n)) -> (index k (createFin f) = f k)
-createFinCorrect f fZ = ?createFinCorrect_lemma
-
 memoize : {a : Type} -> (n : Nat) -> (Fin (S n) -> a) -> Fin (S n) -> a
 memoize {a = a} n f = let mem : Vect (S n) (Lazy a) = createFin (\x : Fin (S n) => (f x)) in (\x => index x mem)
 
@@ -412,19 +409,6 @@ indexes : {n : Nat} -> Vect n (Fin n)
 indexes {n = Z} = []
 indexes {n = S n'} = fZ::map fS indexes
 
---rename this?
-total
-map_property : (i : Fin n) -> (v : Vect n a) -> (f : a -> b) -> (index i (map f v) = f (index i v))
-map_property fZ     (x::xs) _ = refl
-map_property (fS i) (_::xs) f = map_property i xs f
-
-total
-indexes_correct : (i : Fin n) -> (index i indexes = i)
-indexes_correct fZ = refl
-indexes_correct {n = S n'} (fS f) = rewrite map_property f indexes fS in
-                                    rewrite indexes_correct f in
-                                    refl
-
 -- We try to compute a function iteratively, folding over the toplevel dimension (time) and the lower level
 -- dimension. (Mapping on x is not appropriate as we want to index into different parts of the list.)
 
@@ -437,14 +421,29 @@ foldXf f f2 = let a = map (f2 f) indexes in -- Need this part to be evaluated ju
                                             -- TODO find order of evaluation
               (\x => index x a)
 
--- Probably a better definition of memoize                            
+-- Probably a better definition of memoize
+total
 memoize' : {n : Nat} -> (Fin n -> a) -> Fin n -> a
 memoize' f = let a = map f indexes in
          \i => index i a
 
-memoize_correct : (f : Fin n -> a) -> (i : Fin n) -> (memoize' f i = f i)
-memoize_correct f i = rewrite map_property i indexes f in
-                      rewrite indexes_correct i in
+-- Indexing indexing into a function f mapped over a vector v is the same as applying f to the value of v at
+-- the given index.
+total
+index_map_commute : (i : Fin n) -> (v : Vect n a) -> (f : a -> b) -> (index i (map f v) = f (index i v))
+index_map_commute fZ     (x::xs) _ = refl
+index_map_commute (fS i) (_::xs) f = index_map_commute i xs f
+
+total
+indexing_indexes_neutral : (i : Fin n) -> (index i indexes = i)
+indexing_indexes_neutral fZ     = refl
+indexing_indexes_neutral (fS f) = rewrite index_map_commute f indexes fS in
+                                  rewrite indexing_indexes_neutral f in
+                                  refl                                    
+total
+memoize_neutral : (f : Fin n -> a) -> (i : Fin n) -> (memoize' f i = f i)
+memoize_neutral f i = rewrite index_map_commute i indexes f in
+                      rewrite indexing_indexes_neutral i in
                       refl
 
 -- In this particular case, we just want to iterate over T.  
@@ -456,7 +455,8 @@ foldTXf : {m : Nat} -> (n : Nat) -> (init : Fin m -> a) -> (step : (Fin m -> a) 
 foldTXf Z     init _ = init
 foldTXf (S n) init f = foldTXf n (foldXf init f) f
 
--- exponentiate function with memoization
+-- exponentiate function with memoization.
+-- we could easily prove this to be the same as just exponentiation, as we have a theorem that memoize is neutral
 expF : {a : Type} -> Nat -> (Fin n -> a) -> ((Fin n -> a) -> Fin n -> a) -> Fin n -> a
 expF Z     init _ = init
 expF (S n) init f = expF n (memoize' (f init)) f
