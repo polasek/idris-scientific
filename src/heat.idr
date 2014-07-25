@@ -1,3 +1,5 @@
+import Relative
+
 -- For simplicity, now only have extents of time and space in (0,eT) and (0,eX) respectively
 -- Should probably do this in fractions, which would allow us to bound the range of t and x.
 --approx : (dT : Real) -> (dX : Real) -> (eT : Real) -> (eX : Real) -> (Real,Real) -> 
@@ -345,6 +347,7 @@ createRev (S n) f = f n::createRev n f
 create : (n : Nat) -> (f : (Nat -> a)) -> Vect n a
 create n f = reverse (createRev n f)
 
+total
 lastIsLast : (k : Nat) -> (finToNat (last {n = k}) = k)
 lastIsLast Z = refl
 lastIsLast (S k') = rewrite (lastIsLast k') in refl
@@ -361,7 +364,7 @@ createFin : (f : Fin (S n) -> a) -> Vect (S n) a
 createFin {n = k} f = rewrite sym (lastIsLast k) in reverse (create_ f (last {n = k}))
 
 memoize : {a : Type} -> (n : Nat) -> (Fin (S n) -> a) -> Fin (S n) -> a
-memoize {a = a} n f = let mem : Vect (S n) (Lazy a) = createFin (\x : Fin (S n) => (f x)) in (\x => index x mem)
+memoize {a = a} n f = let mem : Vect (S n) (Lazy a) = createFin (\x : Fin (S n) => (f x)) in (\x => Vect.index x mem)
 
 -- A version failing to use memoization. This might prove more difficult than expected.
 approx7 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat)
@@ -398,9 +401,39 @@ complement {n = (S _)}     fZ     = last
 complement {n = (S (S _))} (fS i) = weaken (complement i)
 complement {n = (S Z)} (fS fZ) impossible
 
-reverseCorrect : (v : Vect n a) -> (i : Fin n) -> (index i v = index (complement i) (reverse v))
-reverseCorrect {n = S Z} v fZ = ?reverseCorrect_lemma
+total
+weaken_value_neutral : (i : Fin n) -> (finToNat (weaken i) = finToNat i)
+weaken_value_neutral fZ     = refl
+weaken_value_neutral (fS i) = rewrite weaken_value_neutral i in refl
 
+total
+complement_complements : (a : Fin (S n)) -> (finToNat a + finToNat (complement a) = n)
+complement_complements {n = k}   fZ     = rewrite lastIsLast k in refl
+complement_complements {n = S k} (fS i) = rewrite weaken_value_neutral (complement i) in
+                                          rewrite complement_complements i in
+                                          refl
+complement_complements {n = Z} (fS fZ) impossible
+
+total
+last_cons_neutral : (xs : Vect (S n) a) -> (y : a) -> (last (y::xs) = last xs)
+last_cons_neutral [x]     _ = refl
+last_cons_neutral {n = S k} (x::xs) y = rewrite last_cons_neutral xs x in refl
+
+total
+index_last : (v : Vect (S n) a) -> (index last v = last v)
+index_last {n = Z}   [x]     = refl
+index_last {n = S k} (x::xs) = rewrite last_cons_neutral xs x in
+                               rewrite index_last xs in
+                               refl
+                               
+last_is_first : (v : Vect n a) -> (y : a) -> (last (reverse (y::v)) = y)
+last_is_first [] _ = refl
+last_is_first (x::xs) y = let ih = last_is_first xs y in ?asd
+
+reverseCorrect : (v : Vect n a) -> (i : Fin n) -> (index i v = index (complement i) (reverse v))
+reverseCorrect {n = S Z} [x] fZ = refl
+reverseCorrect {n = S k} (x::xs) fZ = rewrite index_last (reverse (x::xs)) in
+                                      ?asd
 --reverseCorrect {n = Z} _ fZ impossible
 
 -- Indexes from 0 to (n-1)
@@ -427,9 +460,15 @@ memoize' : {n : Nat} -> (Fin n -> a) -> Fin n -> a
 memoize' f = let a = map f indexes in
          \i => index i a
 
+
+total
+memoize'' : {n : Nat} -> (Index n -> a) -> Index n -> a
+memoize'' f = let a = map (f . lift) indexes in
+              \i => Relative.index i a
+                  
 -- Indexing indexing into a function f mapped over a vector v is the same as applying f to the value of v at
 -- the given index.
-total
+total --naturality property
 index_map_commute : (i : Fin n) -> (v : Vect n a) -> (f : a -> b) -> (index i (map f v) = f (index i v))
 index_map_commute fZ     (x::xs) _ = refl
 index_map_commute (fS i) (_::xs) f = index_map_commute i xs f
@@ -465,6 +504,13 @@ expF (S n) init f = expF n (memoize' (f init)) f
 expF' : {a : Type} -> Nat -> (Fin n -> a) -> ((Fin n -> a) -> Fin n -> a) -> Fin n -> a
 expF' n init f = foldr (\f => \acc => memoize' (f acc)) init (Vect.replicate n f)
 
+
+-- An alternative definition using fold over vectors. Maybe not the nicest implementation?
+expF'' : {a : Type} -> Nat -> (Index n -> a) -> ((Index n -> a) -> Index n -> a) -> Index n -> a
+expF'' n init f = foldr (\f => \acc => memoize'' (f acc)) init (Vect.replicate n f)
+
+
+
 weaken' : Fin n -> Fin (n + 1)
 weaken' {n = n'} f = rewrite (plusCommutative n' 1) in weaken f
 
@@ -475,7 +521,7 @@ fS' {n = n'} f = rewrite (plusCommutative n' 1) in fS f
 -- on the actual timestep. (Had that in previous definitions as well, but is an important notion. Perhaps we could
 -- enforce this even further, decouple plumbing and data.)
 approx8 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S eT)) -> (x : Fin (S eX)) -> Float
-approx8 alpha dT dX eT' eX' = (\t => \x => index x (foldTX (finToNat t) (map initial indexes) step)) where
+approx8 alpha dT dX eT' eX' = (\t => \x => Vect.index x (foldTX (finToNat t) (map initial indexes) step)) where
         initial : Fin eX -> Float
         initial fZ = 1.0
         initial _  = 0.0
@@ -488,7 +534,7 @@ approx8 alpha dT dX eT' eX' = (\t => \x => index x (foldTX (finToNat t) (map ini
              step {eX = (S (eXb + (S Z)))} a (fS (weakenN (S Z) y))
              | interior eXb (S Z) y =
                let c = alpha * (dT / (dX * dX)) in
-               let app  =  (\i => index i a) in
+               let app  =  (\i => Vect.index i a) in
 --               rewrite (plusCommutative eXb 1) in
                app (fS (weaken' y))
                     +  c * (app (weaken (weaken' y))
@@ -536,3 +582,25 @@ approx10 alpha dT dX eT' eX' t = expF' (finToNat t) initial step where
                                - 2.0 * prevT (fS (weaken' y))
                                + prevT (fS (fS' y)))
         step {eX = Z} _ (fS fZ) impossible
+
+
+approx11 : (alpha : Float) -> (dT : Float) -> (dX : Float) -> (eT : Nat) -> (eX : Nat) -> (t : Fin (S (S eT))) -> (x : Fin (S (S eX))) -> Float
+approx11 alpha dT dX eT' eX' t x = expF'' (finToNat t) initial step (lift x) where
+        initial : Index n -> Float
+        initial i with (compute_position i)
+                | First _   = 1.0
+                | _         = 0.0              
+
+        step : (Index eX -> Float) -> Index eX -> Float
+        step f i with (compute_position i)
+             | First _    = 1.0
+             | Last _     = 0.0
+             | Center j = 
+               let c = alpha * (dT / (dX * dX)) in
+                 f (iN j) + c * (f (iP j) - 2.0 * f (iN j) + f (iS j))
+
+x : Fin (S (S (S (S (S Z)))))
+x = fS (fS (fS (fS fZ)))
+
+y : Index (S (S (S Z)))
+y = lift x
